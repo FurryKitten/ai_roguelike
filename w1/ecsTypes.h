@@ -89,6 +89,11 @@ struct PowerupAmount
   float amount = 0.f;
 };
 
+struct Cooldown
+{
+  int time = 0;
+};
+
 struct PlayerInput
 {
   bool left = false;
@@ -103,6 +108,8 @@ struct Symbol
 };
 
 struct IsPlayer {};
+struct IsMonster {};
+struct IsFriend {};
 
 struct Team
 {

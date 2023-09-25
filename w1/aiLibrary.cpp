@@ -67,6 +67,100 @@ static void on_closest_enemy_pos(flecs::world &ecs, flecs::entity entity, Callab
   });
 }
 
+template<typename Tag, typename Callable>
+static void on_closest_tagged_pos(flecs::world &ecs, flecs::entity entity, Callable c)
+{
+  static auto targets = ecs.query<const Position, const Tag>();
+  entity.set([&](const Position &pos, Action &a)
+  {
+    flecs::entity closestTarget;
+    float closestDist = FLT_MAX;
+    Position closestPos;
+    targets.each([&](flecs::entity enemy, const Position &epos, const Tag &tag)
+    {
+      float curDist = dist(epos, pos);
+      if (curDist < closestDist)
+      {
+        closestDist = curDist;
+        closestPos = epos;
+        closestTarget = enemy;
+      }
+    });
+    if (ecs.is_valid(closestTarget))
+      c(a, pos, closestPos);
+  });
+}
+
+template <typename Tag>
+class MoveToTaggedState : public State
+{
+public:
+  void enter() const override {}
+  void exit() const override {}
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  {
+    on_closest_tagged_pos<Tag>(ecs, entity, [&](Action &a, const Position &pos, const Position &tagged_pos)
+    {
+      a.action = move_towards(pos, tagged_pos);
+    });
+  }
+};
+
+template <typename Tag>
+class PatrolTaggedState : public State
+{
+  float patrolDist;
+public:
+  PatrolTaggedState(float dist) : patrolDist(dist) {}
+  void enter() const override {}
+  void exit() const override {}
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  {
+    on_closest_tagged_pos<Tag>(ecs, entity, [&](Action &a, const Position &player_pos, const Position &tagged_pos)
+    {
+      entity.set([&](const Position &pos, const PatrolPos &ppos, Action &a)
+      {
+        if (dist(tagged_pos, pos) > patrolDist)
+        {
+          a.action = move_towards(pos, tagged_pos);
+        }
+        else
+        {
+          a.action = GetRandomValue(EA_MOVE_START, EA_MOVE_END - 1);
+        }
+      });
+    });
+  }
+};
+
+class HealPlayerState : public State
+{
+  float healingDist;
+  float healAmount;
+  int cooldownTime;
+public:
+  HealPlayerState(float dist, float heal, int cooldown) : healingDist(dist), healAmount(heal), cooldownTime(cooldown) {}
+  void enter() const override {}
+  void exit() const override {}
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  {
+    auto playerQuery = ecs.query<Hitpoints&>();
+    entity.set([&](const Position &pos, const PatrolPos &ppos, Action &a, Cooldown& cooldown)
+    {
+      if (dist(pos, ppos) > healingDist)
+        a.action = move_towards(pos, ppos);
+      else
+      {
+        playerQuery.each([&](Hitpoints &health)
+        {
+          health.hitpoints += healAmount;
+        });
+        cooldown.time = cooldownTime;
+      }
+    });
+  }
+};
+
 class MoveToEnemyState : public State
 {
 public:
@@ -118,6 +212,22 @@ public:
   }
 };
 
+class HealState : public State
+{
+  float healAmount;
+public:
+  HealState(float amount) : healAmount(amount) {}
+  void enter() const override {}
+  void exit() const override {}
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  {
+    entity.set([&](const Position &pos, Hitpoints &health, Action &a)
+    {
+      health.hitpoints += healAmount;
+    });
+  }
+};
+
 class NopState : public State
 {
 public:
@@ -162,6 +272,38 @@ public:
       hitpointsThresholdReached |= hp.hitpoints < threshold;
     });
     return hitpointsThresholdReached;
+  }
+};
+
+
+class PlayerHPLessThanTransition : public StateTransition
+{
+  float threshold;
+public:
+  PlayerHPLessThanTransition(float in_thres) : threshold(in_thres) {}
+  bool isAvailable(flecs::world &ecs, flecs::entity entity) const override
+  {
+    auto playerQuery = ecs.query<Hitpoints&>();
+    bool hitpointsThresholdReached = false;
+    playerQuery.each([&](Hitpoints &health)
+    {
+      hitpointsThresholdReached |= health.hitpoints < threshold;
+    });
+    return hitpointsThresholdReached;
+  }
+};
+
+class CooldownReadyTransition : public StateTransition
+{
+public:
+  bool isAvailable(flecs::world &ecs, flecs::entity entity) const override
+  {
+    bool cooldownReady = false;
+    entity.get([&](const Cooldown &cd)
+    {
+      cooldownReady |= cd.time <= 0;
+    });
+    return cooldownReady;
   }
 };
 
@@ -211,6 +353,7 @@ State *create_attack_enemy_state()
 {
   return new AttackEnemyState();
 }
+
 State *create_move_to_enemy_state()
 {
   return new MoveToEnemyState();
@@ -257,3 +400,39 @@ StateTransition *create_and_transition(StateTransition *lhs, StateTransition *rh
   return new AndTransition(lhs, rhs);
 }
 
+
+State *create_heal_state(float healAmount)
+{
+  return new HealState(healAmount);
+}
+
+State *create_heal_player_state(float healingDist, float healAmount, int cooldownTime)
+{
+  return new HealPlayerState(healingDist, healAmount, cooldownTime);
+}
+
+template <typename Tag>
+State *create_move_to_tagged_state()
+{
+  return new MoveToTaggedState<Tag>();
+}
+template State *create_move_to_tagged_state<IsPlayer>();
+template State *create_move_to_tagged_state<IsMonster>();
+
+template <typename Tag>
+State *create_patrol_tagged_state(float dist)
+{
+  return new PatrolTaggedState<Tag>(dist);
+}
+template State *create_patrol_tagged_state<IsPlayer>(float dist);
+
+
+StateTransition *create_cooldown_transition()
+{
+  return new CooldownReadyTransition();
+}
+
+StateTransition *create_player_hp_less_transition(float hp)
+{
+  return new PlayerHPLessThanTransition(hp);
+}

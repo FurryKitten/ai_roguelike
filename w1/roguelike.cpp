@@ -4,6 +4,48 @@
 #include "stateMachine.h"
 #include "aiLibrary.h"
 
+static void add_berserk_sm(flecs::entity entity)
+{
+  entity.get([](StateMachine &sm)
+  {
+    int patrol = sm.addState(create_patrol_state(4.f));
+    int moveToEnemy = sm.addState(create_move_to_enemy_state());
+
+    sm.addTransition(create_enemy_available_transition(7.f), patrol, moveToEnemy);
+    sm.addTransition(create_hitpoints_less_than_transition(60.f), patrol, moveToEnemy);
+
+    sm.addTransition(create_and_transition(create_negate_transition(create_enemy_available_transition(7.f)), 
+                     create_negate_transition(create_hitpoints_less_than_transition(60.f))), moveToEnemy, patrol);
+  });
+}
+
+static void add_healer_sm(flecs::entity entity)
+{
+  entity.get([](StateMachine &sm)
+  {
+    int patrol = sm.addState(create_patrol_state(4.f));
+    int heal = sm.addState(create_heal_state(10.f));
+
+    sm.addTransition(create_hitpoints_less_than_transition(90.f), patrol, heal);
+    sm.addTransition(create_negate_transition(create_hitpoints_less_than_transition(90.f)), heal, patrol);
+  });
+}
+
+static void add_guardian_sm(flecs::entity entity)
+{
+  entity.get([&](StateMachine &sm)
+  {
+    int patrol_player = sm.addState(create_patrol_tagged_state<IsPlayer>(5.f));
+    int heal_player = sm.addState(create_heal_player_state(5.0f, 20.0f, 10));
+    int attack_enemy = sm.addState(create_move_to_tagged_state<IsMonster>());
+
+    sm.addTransition(create_and_transition(create_player_hp_less_transition(100.f), create_cooldown_transition()), patrol_player, heal_player);
+    sm.addTransition(create_negate_transition(create_cooldown_transition()), heal_player, patrol_player);
+    sm.addTransition(create_enemy_available_transition(4.f), patrol_player, attack_enemy);
+    sm.addTransition(create_negate_transition(create_enemy_available_transition(5.f)), attack_enemy, patrol_player);
+  });
+}
+
 static void add_patrol_attack_flee_sm(flecs::entity entity)
 {
   entity.get([](StateMachine &sm)
@@ -52,6 +94,7 @@ static flecs::entity create_monster(flecs::world &ecs, int x, int y, Color color
     .set(PatrolPos{x, y})
     .set(Hitpoints{100.f})
     .set(Action{EA_NOP})
+    .add<IsMonster>()
     .set(Color{color})
     .set(StateMachine{})
     .set(Team{1})
@@ -59,8 +102,25 @@ static flecs::entity create_monster(flecs::world &ecs, int x, int y, Color color
     .set(MeleeDamage{20.f});
 }
 
-static void create_player(flecs::world &ecs, int x, int y)
+static flecs::entity create_npc(flecs::world &ecs, int x, int y, Color color)
 {
+  return ecs.entity()
+    .set(Position{x, y})
+    .set(MovePos{x, y})
+    .set(Hitpoints{100.f})
+    .set(Action{EA_NOP})
+    .add<IsFriend>()
+    .set(Color{color})
+    .set(StateMachine{})
+    .set(Team{0})
+    .set(NumActions{1, 0})
+    .set(MeleeDamage{20.f})
+    .set(Cooldown{0});
+}
+
+static flecs::entity create_player(flecs::world &ecs, int x, int y)
+{
+  return
   ecs.entity("player")
     .set(Position{x, y})
     .set(MovePos{x, y})
@@ -135,12 +195,16 @@ void init_roguelike(flecs::world &ecs)
 {
   register_roguelike_systems(ecs);
 
-  add_patrol_attack_flee_sm(create_monster(ecs, 5, 5, GetColor(0xee00eeff)));
+  /* add_patrol_attack_flee_sm(create_monster(ecs, 5, 5, GetColor(0xee00eeff)));
   add_patrol_attack_flee_sm(create_monster(ecs, 10, -5, GetColor(0xee00eeff)));
   add_patrol_flee_sm(create_monster(ecs, -5, -5, GetColor(0x111111ff)));
-  add_attack_sm(create_monster(ecs, -5, 5, GetColor(0x880000ff)));
+  add_attack_sm(create_monster(ecs, -5, 5, GetColor(0x880000ff))); */
 
-  create_player(ecs, 0, 0);
+  add_berserk_sm(create_monster(ecs, 5, 5, GetColor(0x660000ff)));
+  add_healer_sm(create_monster(ecs, 5, -5, GetColor(0x007700ff)));
+  add_guardian_sm(create_npc(ecs, -5, -5, GetColor(0x001199ff)));
+
+  auto player = create_player(ecs, 0, 0);
 
   create_powerup(ecs, 7, 7, 10.f);
   create_powerup(ecs, 10, -6, 10.f);
@@ -252,6 +316,15 @@ static void process_actions(flecs::world &ecs)
           entity.destruct();
         }
       });
+    });
+  });
+
+  static auto countCooldown = ecs.query<Cooldown>();
+  ecs.defer([&]
+  {
+    countCooldown.each([&](Cooldown &cooldown)
+    {
+      if (cooldown.time > 0) --cooldown.time;
     });
   });
 }
