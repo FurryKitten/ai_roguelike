@@ -5,9 +5,10 @@
 class State
 {
 public:
+  virtual ~State() {};
   virtual void enter() const = 0;
   virtual void exit() const = 0;
-  virtual void act(float dt, flecs::world &ecs, flecs::entity entity) const = 0;
+  virtual void act(float dt, flecs::world &ecs, flecs::entity entity) = 0;
 };
 
 class StateTransition
@@ -17,7 +18,7 @@ public:
   virtual bool isAvailable(flecs::world &ecs, flecs::entity entity) const = 0;
 };
 
-class StateMachine
+class StateMachine : public State
 {
   int curStateIdx = 0;
   std::vector<State*> states;
@@ -32,8 +33,9 @@ public:
   StateMachine &operator=(const StateMachine &sm) = default;
   StateMachine &operator=(StateMachine &&sm) = default;
 
-
-  void act(float dt, flecs::world &ecs, flecs::entity entity);
+  virtual void enter() const {}
+  virtual void exit() const {}
+  virtual void act(float dt, flecs::world &ecs, flecs::entity entity);
 
   int addState(State *st);
   void addTransition(StateTransition *trans, int from, int to);

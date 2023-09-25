@@ -3,7 +3,8 @@
 StateMachine::~StateMachine()
 {
   for (State* state : states)
-    delete state;
+    if (dynamic_cast<StateMachine*>(state) == nullptr)
+      delete state;
   states.clear();
   for (auto &transList : transitions)
     for (auto &transition : transList)

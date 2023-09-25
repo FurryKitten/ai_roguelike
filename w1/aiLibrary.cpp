@@ -10,7 +10,7 @@ class AttackEnemyState : public State
 public:
   void enter() const override {}
   void exit() const override {}
-  void act(float/* dt*/, flecs::world &/*ecs*/, flecs::entity /*entity*/) const override {}
+  void act(float/* dt*/, flecs::world &/*ecs*/, flecs::entity /*entity*/) override {}
 };
 
 template<typename T>
@@ -91,13 +91,81 @@ static void on_closest_tagged_pos(flecs::world &ecs, flecs::entity entity, Calla
   });
 }
 
+class LootResourcesState : public State
+{
+public:
+  void enter() const override {}
+  void exit() const override {}
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override
+  {
+    auto chestQuery = ecs.query<const Position&, Chest&>();
+    entity.set([&](const Position &pos, Craft &craft)
+    {
+      chestQuery.each([&](const Position& chest_pos, Chest& chest)
+      {
+        if (dist(chest_pos, pos) > 2.f) return;
+        if (chest.resources > 0) {
+          --chest.resources;
+          ++craft.resources;
+        }
+        if (craft.craftedItems > 0) {
+          --craft.craftedItems;
+          ++chest.items;
+        }
+      });
+    });
+  }
+};
+
+class CraftState : public State
+{
+public:
+  void enter() const override {}
+  void exit() const override {}
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override
+  {
+    entity.set([&](const Position &pos, Craft &craft)
+    {
+      if (craft.resources > 0 || craft.craftedItems >= craft.itemsToCraft)
+      {
+        ++craft.craftedItems;
+        --craft.resources;
+      }
+    });
+  }
+};
+
+class SleepState : public State
+{
+  int sleepTime;
+public:
+  SleepState(int sleep) : sleepTime(sleep){}
+  void enter() const override {}
+  void exit() const override {}
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override {
+    auto chestQuery = ecs.query<Chest&>();
+    entity.set([&](Cooldown& cooldown)
+    {
+      if (cooldown.time <= 0)
+      {
+        cooldown.time = sleepTime;
+      
+        chestQuery.each([&](Chest& chest)
+        {
+          chest.items = 0;
+        });
+      }
+    });
+  }
+};
+
 template <typename Tag>
 class MoveToTaggedState : public State
 {
 public:
   void enter() const override {}
   void exit() const override {}
-  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override
   {
     on_closest_tagged_pos<Tag>(ecs, entity, [&](Action &a, const Position &pos, const Position &tagged_pos)
     {
@@ -114,7 +182,7 @@ public:
   PatrolTaggedState(float dist) : patrolDist(dist) {}
   void enter() const override {}
   void exit() const override {}
-  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override
   {
     on_closest_tagged_pos<Tag>(ecs, entity, [&](Action &a, const Position &player_pos, const Position &tagged_pos)
     {
@@ -142,7 +210,7 @@ public:
   HealPlayerState(float dist, float heal, int cooldown) : healingDist(dist), healAmount(heal), cooldownTime(cooldown) {}
   void enter() const override {}
   void exit() const override {}
-  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override
   {
     auto playerQuery = ecs.query<Hitpoints&>();
     entity.set([&](const Position &pos, const PatrolPos &ppos, Action &a, Cooldown& cooldown)
@@ -166,7 +234,7 @@ class MoveToEnemyState : public State
 public:
   void enter() const override {}
   void exit() const override {}
-  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override
   {
     on_closest_enemy_pos(ecs, entity, [&](Action &a, const Position &pos, const Position &enemy_pos)
     {
@@ -181,7 +249,7 @@ public:
   FleeFromEnemyState() {}
   void enter() const override {}
   void exit() const override {}
-  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override
   {
     on_closest_enemy_pos(ecs, entity, [&](Action &a, const Position &pos, const Position &enemy_pos)
     {
@@ -197,7 +265,7 @@ public:
   PatrolState(float dist) : patrolDist(dist) {}
   void enter() const override {}
   void exit() const override {}
-  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override
   {
     entity.set([&](const Position &pos, const PatrolPos &ppos, Action &a)
     {
@@ -219,7 +287,7 @@ public:
   HealState(float amount) : healAmount(amount) {}
   void enter() const override {}
   void exit() const override {}
-  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override
   {
     entity.set([&](const Position &pos, Hitpoints &health, Action &a)
     {
@@ -233,7 +301,7 @@ class NopState : public State
 public:
   void enter() const override {}
   void exit() const override {}
-  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) const override {}
+  void act(float/* dt*/, flecs::world &ecs, flecs::entity entity) override {}
 };
 
 class EnemyAvailableTransition : public StateTransition
@@ -256,6 +324,84 @@ public:
       });
     });
     return enemiesFound;
+  }
+};
+
+template <typename Tag>
+class NearTargetTransition : public StateTransition
+{
+  float triggerDist;
+public:
+  NearTargetTransition(float in_dist) : triggerDist(in_dist) {}
+  bool isAvailable(flecs::world &ecs, flecs::entity entity) const override
+  {
+    static auto query = ecs.query<const Position, const Tag>();
+    bool isNear = false;
+    entity.get([&](const Position &pos)
+    {
+      query.each([&](flecs::entity enemy, const Position &target_pos, const Tag &tag)
+      {
+        float curDist = dist(target_pos, pos);
+        isNear |= curDist <= triggerDist;
+      });
+    });
+    return isNear;
+  }
+};
+
+
+class LootedResourcesTransition : public StateTransition
+{
+public:
+  bool isAvailable(flecs::world &ecs, flecs::entity entity) const override
+  {
+    bool isLooted = false;
+    auto chestQuery = ecs.query<const Position&, const Chest&>();
+    entity.get([&](const Position& pos, const Craft& craft)
+    {
+      isLooted |= craft.resources >= craft.itemsToCraft;
+      chestQuery.each([&](const Position& chest_pos, const Chest& chest)
+      {
+        if (dist(chest_pos, pos) > 2.f) return;
+        isLooted |= chest.resources <= 0;
+      });
+    });
+    return isLooted;
+  }
+};
+
+class CraftedEnoughTransition : public StateTransition
+{
+public:
+  bool isAvailable(flecs::world &ecs, flecs::entity entity) const override
+  {
+    bool isCrafted = false;
+    entity.get([&](const Craft& craft)
+    {
+      isCrafted |= craft.craftedItems >= craft.itemsToCraft;
+    });
+    return isCrafted;
+  }
+};
+
+class FilledChestTransition : public StateTransition
+{
+  int itemsThreshold;
+public:
+  FilledChestTransition(int threshold) : itemsThreshold(threshold) {}
+  bool isAvailable(flecs::world &ecs, flecs::entity entity) const override
+  {
+    bool isFilled = false;
+    auto chestQuery = ecs.query<const Position&, const Chest&>();
+    entity.get([&](const Position& pos, const Craft& craft)
+    {
+      chestQuery.each([&](const Position& chest_pos, const Chest& chest)
+      {
+        if (dist(chest_pos, pos) > 2.f) return;
+        isFilled |= chest.items >= itemsThreshold;
+      });
+    });
+    return isFilled;
   }
 };
 
@@ -418,6 +564,9 @@ State *create_move_to_tagged_state()
 }
 template State *create_move_to_tagged_state<IsPlayer>();
 template State *create_move_to_tagged_state<IsMonster>();
+template State *create_move_to_tagged_state<CraftingTable>();
+template State *create_move_to_tagged_state<Chest>();
+template State *create_move_to_tagged_state<Bed>();
 
 template <typename Tag>
 State *create_patrol_tagged_state(float dist)
@@ -426,6 +575,22 @@ State *create_patrol_tagged_state(float dist)
 }
 template State *create_patrol_tagged_state<IsPlayer>(float dist);
 
+
+State *create_loot_resources_state()
+{
+  return new LootResourcesState();
+}
+
+State *create_craft_state()
+{
+  return new CraftState();
+}
+
+
+State *create_sleep_state(int time)
+{
+  return new SleepState(time);
+}
 
 StateTransition *create_cooldown_transition()
 {
@@ -436,3 +601,27 @@ StateTransition *create_player_hp_less_transition(float hp)
 {
   return new PlayerHPLessThanTransition(hp);
 }
+
+StateTransition *create_crafted_enough_transition()
+{
+  return new CraftedEnoughTransition();
+}
+
+StateTransition *create_looted_enough_transition()
+{
+  return new LootedResourcesTransition();
+}
+
+StateTransition *create_filled_chest_transition(int items)
+{
+  return new FilledChestTransition(items);
+}
+
+template <typename Tag>
+StateTransition *create_near_target_transition(float dist)
+{
+  return new NearTargetTransition<Tag>(dist);
+}
+template StateTransition *create_near_target_transition<CraftingTable>(float dist);
+template StateTransition *create_near_target_transition<Chest>(float dist);
+template StateTransition *create_near_target_transition<Bed>(float dist);

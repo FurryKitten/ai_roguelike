@@ -4,6 +4,45 @@
 #include "stateMachine.h"
 #include "aiLibrary.h"
 
+static void add_crafter_sm(flecs::entity entity)
+{
+  entity.get([](StateMachine &sm)
+  {
+    /// Craft state
+    auto craft_sm = new StateMachine{};
+    int go_to_chest = craft_sm->addState(create_move_to_tagged_state<Chest>());
+    int go_to_craft = craft_sm->addState(create_move_to_tagged_state<CraftingTable>());
+    int craft = craft_sm->addState(create_craft_state());
+    int loot = craft_sm->addState(create_loot_resources_state());
+    craft_sm->addTransition(create_near_target_transition<Chest>(1.f), go_to_chest, loot);
+    craft_sm->addTransition(create_near_target_transition<CraftingTable>(1.f), go_to_craft, craft);
+    craft_sm->addTransition(create_crafted_enough_transition(), craft, go_to_chest);
+    craft_sm->addTransition(create_looted_enough_transition(), loot, go_to_craft);
+
+    /// Sleep state
+    auto sleep_sm = new StateMachine{};
+    int go_to_bed = sleep_sm->addState(create_move_to_tagged_state<Bed>());
+    int sleep = sleep_sm->addState(create_sleep_state(10));
+    sleep_sm->addTransition(create_near_target_transition<Bed>(1.f), go_to_bed, sleep);
+
+    /// Protect state
+    auto protect_sm = new StateMachine{};
+    int move_to_enemy = protect_sm->addState(create_move_to_enemy_state());
+    int heal = protect_sm->addState(create_heal_state(20.f));
+    protect_sm->addTransition(create_hitpoints_less_than_transition(60.f), move_to_enemy, heal);
+    protect_sm->addTransition(create_negate_transition(create_hitpoints_less_than_transition(60.f)), heal, move_to_enemy);
+
+    int craft_sm_id = sm.addState(craft_sm);
+    int sleep_sm_id = sm.addState(sleep_sm);
+    int protect_sm_id = sm.addState(protect_sm);
+
+    sm.addTransition(create_and_transition(create_near_target_transition<Bed>(1.f), create_cooldown_transition()), sleep_sm_id, craft_sm_id);
+    sm.addTransition(create_filled_chest_transition(10), craft_sm_id, sleep_sm_id);
+    sm.addTransition(create_enemy_available_transition(5.f), craft_sm_id, protect_sm_id);
+    sm.addTransition(create_negate_transition(create_enemy_available_transition(4.f)), protect_sm_id, craft_sm_id);
+  });
+}
+
 static void add_berserk_sm(flecs::entity entity)
 {
   entity.get([](StateMachine &sm)
@@ -118,6 +157,23 @@ static flecs::entity create_npc(flecs::world &ecs, int x, int y, Color color)
     .set(Cooldown{0});
 }
 
+static flecs::entity create_crafter(flecs::world &ecs, int x, int y, Color color)
+{
+  return ecs.entity()
+    .set(Position{x, y})
+    .set(MovePos{x, y})
+    .set(Hitpoints{100.f})
+    .set(Action{EA_NOP})
+    .add<IsFriend>()
+    .set(Color{color})
+    .set(StateMachine{})
+    .set(Team{0})
+    .set(NumActions{1, 0})
+    .set(MeleeDamage{20.f})
+    .set(Cooldown{0})
+    .set(Craft{.resources = 0, .itemsToCraft = 10, .craftedItems = 0});
+}
+
 static flecs::entity create_player(flecs::world &ecs, int x, int y)
 {
   return
@@ -148,6 +204,30 @@ static void create_powerup(flecs::world &ecs, int x, int y, float amount)
     .set(Position{x, y})
     .set(PowerupAmount{amount})
     .set(Color{255, 255, 0, 255});
+}
+
+static void create_chest(flecs::world &ecs, int x, int y)
+{
+  ecs.entity()
+    .set(Position{x, y})
+    .set(Color{125, 200, 50, 255})
+    .set(Chest{1000, 0});
+}
+
+static void create_crafting_table(flecs::world &ecs, int x, int y)
+{
+  ecs.entity()
+    .set(Position{x, y})
+    .add<CraftingTable>()
+    .set(Color{125, 200, 125, 255});
+}
+
+static void create_bed(flecs::world &ecs, int x, int y)
+{
+  ecs.entity()
+    .set(Position{x, y})
+    .add<Bed>()
+    .set(Color{250, 250, 250, 255});
 }
 
 static void register_roguelike_systems(flecs::world &ecs)
@@ -203,6 +283,7 @@ void init_roguelike(flecs::world &ecs)
   add_berserk_sm(create_monster(ecs, 5, 5, GetColor(0x660000ff)));
   add_healer_sm(create_monster(ecs, 5, -5, GetColor(0x007700ff)));
   add_guardian_sm(create_npc(ecs, -5, -5, GetColor(0x001199ff)));
+  add_crafter_sm(create_crafter(ecs, 0, -12, GetColor(0x660066ff)));
 
   auto player = create_player(ecs, 0, 0);
 
@@ -212,6 +293,10 @@ void init_roguelike(flecs::world &ecs)
 
   create_heal(ecs, -5, -5, 50.f);
   create_heal(ecs, -5, 5, 50.f);
+
+  create_chest(ecs, 0, -11);
+  create_crafting_table(ecs, 5, -12);
+  create_bed(ecs, 10, -13);
 }
 
 static bool is_player_acted(flecs::world &ecs)

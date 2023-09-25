@@ -94,6 +94,19 @@ struct Cooldown
   int time = 0;
 };
 
+struct Craft
+{
+  int resources = 0;
+  int itemsToCraft = 10;
+  int craftedItems = 0;
+};
+
+struct Chest
+{
+  int resources = 0;
+  int items = 0;
+};
+
 struct PlayerInput
 {
   bool left = false;
@@ -110,6 +123,8 @@ struct Symbol
 struct IsPlayer {};
 struct IsMonster {};
 struct IsFriend {};
+struct CraftingTable {};
+struct Bed {};
 
 struct Team
 {
