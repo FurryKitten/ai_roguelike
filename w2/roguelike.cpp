@@ -11,11 +11,11 @@ static void create_minotaur_beh(flecs::entity e)
   e.set(Blackboard{});
   BehNode *root =
     selector({
-      sequence({
+      /* sequence({
         is_low_hp(50.f),
         find_enemy(e, 4.f, "flee_enemy"),
         flee(e, "flee_enemy")
-      }),
+      }), */
       sequence({
         find_enemy(e, 3.f, "attack_enemy"),
         move_to_entity(e, "attack_enemy")
@@ -23,6 +23,68 @@ static void create_minotaur_beh(flecs::entity e)
       patrol(e, 2.f, "patrol_pos")
     });
   e.set(BehaviourTree{root});
+}
+
+static void create_collector_beh(flecs::entity e)
+{
+  e.set(Blackboard{});
+  BehNode *root =
+    selector({
+      sequence({ // враг рядом
+        find_enemy(e, 2.f, "attack_enemy"),
+        move_to_entity(e, "attack_enemy")
+      }),
+      sequence({ // ищем лут
+        find_closest_by_tag<Pickup>(e, "pickup_entity"),
+        move_to_entity(e, "pickup_entity")
+      }),
+      sequence({ // залутались - идем драться
+        find_closest_by_tag<IsEnemy>(e, "attack_enemy"),
+        move_to_entity(e, "attack_enemy")
+      }),
+    });
+  e.set(BehaviourTree{root});
+}
+
+
+static void create_guard_beh(flecs::entity e, flecs::entity start_waypoint)
+{
+  e.set(Blackboard{});
+  BehNode *root =
+    selector({
+      sequence({ // враг рядом
+        find_enemy(e, 4.f, "attack_enemy"),
+        move_to_entity(e, "attack_enemy")
+      }),
+      sequence({ // ходим по вейпоинтам
+        find_waypoint(e, start_waypoint, "next_waypoint"),
+        move_to_entity(e, "next_waypoint")
+      })
+    });
+  e.set(BehaviourTree{root});
+}
+
+static flecs::entity create_random_waypoint_no_link(flecs::world &ecs, int max_x, int max_y)
+{
+  return ecs.entity()
+            .set(Position{GetRandomValue(-max_x, max_x), GetRandomValue(-max_y, max_y)})
+            .set(Waypoint{})
+            .set(Color{125, 255, 10, 255});
+}
+
+static flecs::entity create_waypoints(flecs::world &ecs, int wp_count, int max_x, int max_y)
+{
+  flecs::entity start_waypoint = create_random_waypoint_no_link(ecs, max_x, max_y);
+  flecs::entity last_waypoint = start_waypoint;
+  for (int i = 1; i < wp_count; ++i)
+  {
+    flecs::entity next_waypoint = create_random_waypoint_no_link(ecs, max_x, max_y);
+    last_waypoint.get_mut<Waypoint>()->nextWaypoint = next_waypoint;
+    last_waypoint = next_waypoint;
+  }
+  last_waypoint.get_mut<Waypoint>()->nextWaypoint = start_waypoint;
+
+  return start_waypoint;
 }
 
 static flecs::entity create_monster(flecs::world &ecs, int x, int y, Color col, const char *texture_src)
@@ -38,6 +100,24 @@ static flecs::entity create_monster(flecs::world &ecs, int x, int y, Color col, 
     .set(StateMachine{})
     .set(Team{1})
     .set(NumActions{1, 0})
+    .set(MeleeDamage{20.f})
+    .set(Blackboard{})
+    .add<IsEnemy>();
+}
+
+static flecs::entity create_npc(flecs::world &ecs, int x, int y, Color col, const char *texture_src)
+{
+  flecs::entity textureSrc = ecs.entity(texture_src);
+  return ecs.entity()
+    .set(Position{x, y})
+    .set(MovePos{x, y})
+    .set(Hitpoints{200.f})
+    .set(Action{EA_NOP})
+    .set(Color{col})
+    .add<TextureSource>(textureSrc)
+    .set(StateMachine{})
+    .set(Team{0})
+    .set(NumActions{2, 0})
     .set(MeleeDamage{20.f})
     .set(Blackboard{});
 }
@@ -65,7 +145,8 @@ static void create_heal(flecs::world &ecs, int x, int y, float amount)
   ecs.entity()
     .set(Position{x, y})
     .set(HealAmount{amount})
-    .set(Color{0xff, 0x44, 0x44, 0xff});
+    .set(Color{0xff, 0x44, 0x44, 0xff})
+    .add<Pickup>();
 }
 
 static void create_powerup(flecs::world &ecs, int x, int y, float amount)
@@ -73,7 +154,8 @@ static void create_powerup(flecs::world &ecs, int x, int y, float amount)
   ecs.entity()
     .set(Position{x, y})
     .set(PowerupAmount{amount})
-    .set(Color{0xff, 0xff, 0x00, 0xff});
+    .set(Color{0xff, 0xff, 0x00, 0xff})
+    .add<Pickup>();
 }
 
 static void register_roguelike_systems(flecs::world &ecs)
@@ -135,17 +217,24 @@ void init_roguelike(flecs::world &ecs)
 
   create_minotaur_beh(create_monster(ecs, 5, 5, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
   create_minotaur_beh(create_monster(ecs, 10, -5, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
-  create_minotaur_beh(create_monster(ecs, -5, -5, Color{0x11, 0x11, 0x11, 0xff}, "minotaur_tex"));
-  create_minotaur_beh(create_monster(ecs, -5, 5, Color{0, 255, 0, 255}, "minotaur_tex"));
+  create_minotaur_beh(create_monster(ecs, -2, -5, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
+  create_collector_beh(create_npc(ecs, -5, -5, Color{255, 255, 255, 0xff}, "minotaur_tex"));
+  create_collector_beh(create_npc(ecs, -5, 5, Color{255, 255, 255, 255}, "minotaur_tex"));
+  create_guard_beh(create_npc(ecs, -10, -10, Color{10, 0, 255, 255}, "swordsman_tex"), create_waypoints(ecs, 5, 10, 10));
 
   create_player(ecs, 0, 0, "swordsman_tex");
 
-  create_powerup(ecs, 7, 7, 10.f);
-  create_powerup(ecs, 10, -6, 10.f);
-  create_powerup(ecs, 10, -4, 10.f);
+  create_powerup(ecs, 7, 8, 10.f);
+  create_powerup(ecs, 10, -7, 10.f);
+  create_powerup(ecs, 10, -5, 10.f);
+  create_powerup(ecs, 20, -5, 10.f);
+  create_powerup(ecs, 10, -15, 10.f);
 
-  create_heal(ecs, -5, -5, 50.f);
-  create_heal(ecs, -5, 5, 50.f);
+  create_heal(ecs, -5, -7, 50.f);
+  create_heal(ecs, -5, 7, 50.f);
+  create_heal(ecs, -15, 7, 50.f);
+  create_heal(ecs, -25, 7, 50.f);
+  create_heal(ecs, -35, 7, 50.f);
 }
 
 static bool is_player_acted(flecs::world &ecs)
@@ -228,11 +317,12 @@ static void process_actions(flecs::world &ecs)
   });
 
   static auto playerPickup = ecs.query<const IsPlayer, const Position, Hitpoints, MeleeDamage>();
+  static auto creaturePickup = ecs.query<const Position, Hitpoints, MeleeDamage>();
   static auto healPickup = ecs.query<const Position, const HealAmount>();
   static auto powerupPickup = ecs.query<const Position, const PowerupAmount>();
   ecs.defer([&]
   {
-    playerPickup.each([&](const IsPlayer&, const Position &pos, Hitpoints &hp, MeleeDamage &dmg)
+    creaturePickup.each([&](const Position &pos, Hitpoints &hp, MeleeDamage &dmg)
     {
       healPickup.each([&](flecs::entity entity, const Position &ppos, const HealAmount &amt)
       {

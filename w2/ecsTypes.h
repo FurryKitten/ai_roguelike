@@ -104,6 +104,8 @@ struct Symbol
 };
 
 struct IsPlayer {};
+struct IsEnemy {};
+struct Pickup {};
 
 struct Team
 {
@@ -112,3 +114,6 @@ struct Team
 
 struct TextureSource {};
 
+struct Waypoint {
+  flecs::entity nextWaypoint;
+};
