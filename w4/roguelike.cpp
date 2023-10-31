@@ -8,6 +8,7 @@
 #include "dungeonUtils.h"
 #include "dijkstraMapGen.h"
 #include "dmapFollower.h"
+#include "aiUtils.h"
 
 static flecs::entity create_player_approacher(flecs::entity e)
 {
@@ -181,6 +182,21 @@ static void create_powerup(flecs::world &ecs, int x, int y, float amount)
     .set(Color{0xff, 0xff, 0x00, 0xff});
 }
 
+static void create_mages(flecs::world &ecs, int count)
+{
+  for (int i = 0; i < count; i++)
+  {
+    flecs::entity e = create_monster(ecs, Color{0x11, 0x11, 0x11, 0xff}, "minotaur_tex");
+    std::string name = "mage_map_";
+    name += std::to_string(i);
+    e.set(TeamMap{name})
+     .set(DmapWeights{{{name.c_str(), {1.8f, 0.8f}}, {"approach_radius_map", {1.f, 1.f}}}});
+  }
+/*   e
+    .set(DmapWeights{{{"mage_approach_map", {1.f, 1.f}}, {"mage_approach_map", {1.8, 0.8f}}}})
+    .add<TeamMap>(DijkstraMapData{}); */
+}
+
 static void register_roguelike_systems(flecs::world &ecs)
 {
   static auto dungeonDataQuery = ecs.query<const DungeonData>();
@@ -311,10 +327,12 @@ void init_roguelike(flecs::world &ecs)
         UnloadTexture(texture);
       });
 
-  create_hive_monster(create_monster(ecs, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
+  /* create_hive_monster(create_monster(ecs, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
   create_hive_monster(create_monster(ecs, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
   create_hive_monster(create_monster(ecs, Color{0x11, 0x11, 0x11, 0xff}, "minotaur_tex"));
-  create_hive(create_player_fleer(create_monster(ecs, Color{0, 255, 0, 255}, "minotaur_tex")));
+  create_hive(create_player_fleer(create_monster(ecs, Color{0, 255, 0, 255}, "minotaur_tex"))); */
+
+  create_mages(ecs, 4);
 
   create_player(ecs, "swordsman_tex");
 
@@ -375,19 +393,6 @@ static bool upd_player_actions_count(flecs::world &ecs)
     actionsReached |= na.curActions == 0;
   });
   return actionsReached;
-}
-
-static Position move_pos(Position pos, int action)
-{
-  if (action == EA_MOVE_LEFT)
-    pos.x--;
-  else if (action == EA_MOVE_RIGHT)
-    pos.x++;
-  else if (action == EA_MOVE_UP)
-    pos.y--;
-  else if (action == EA_MOVE_DOWN)
-    pos.y++;
-  return pos;
 }
 
 static void push_to_log(flecs::world &ecs, const char *msg)
@@ -565,9 +570,21 @@ void process_turn(flecs::world &ecs)
     ecs.entity("hive_map")
       .set(DijkstraMapData{hiveMap});
 
+    std::vector<float> radiusApproachMap;
+    dmaps::gen_player_radius_approach_map(ecs, radiusApproachMap, 4.f);
+    ecs.entity("approach_radius_map")
+      .set(DijkstraMapData{radiusApproachMap});
+
+    auto mages_query = ecs.query<Mage, const TeamMap>();
+    mages_query.each([&](flecs::entity e, const Mage, const TeamMap &map){
+      std::vector<float> teamMap;
+      dmaps::gen_low_hp_map(ecs, teamMap, e, 90);
+      ecs.entity(map.name.c_str()).set(DijkstraMapData{ teamMap });
+    });
+
     //ecs.entity("flee_map").add<VisualiseMap>();
-    ecs.entity("hive_follower_sum")
-      .set(DmapWeights{{{"hive_map", {1.f, 1.f}}, {"approach_map", {1.8f, 0.8f}}}})
+    ecs.entity("approach_radius_map")
+      .set(DmapWeights{{{"approach_radius_map", {1.f, 1.f}}}})
       .add<VisualiseMap>();
   }
 }

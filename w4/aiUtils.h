@@ -22,6 +22,19 @@ inline int inverse_move(int move)
          move == EA_MOVE_DOWN ? EA_MOVE_UP : move;
 }
 
+static Position move_pos(Position pos, int action)
+{
+  if (action == EA_MOVE_LEFT)
+    pos.x--;
+  else if (action == EA_MOVE_RIGHT)
+    pos.x++;
+  else if (action == EA_MOVE_UP)
+    pos.y--;
+  else if (action == EA_MOVE_DOWN)
+    pos.y++;
+  return pos;
+}
+
 template<typename Callable>
 inline void on_closest_enemy_pos(flecs::world &ecs, flecs::entity entity, Callable c)
 {

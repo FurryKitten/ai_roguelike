@@ -163,3 +163,6 @@ struct DmapWeights
 };
 
 struct Hive {};
+
+struct Mage {};
+struct TeamMap { std::string name; };

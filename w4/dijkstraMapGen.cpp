@@ -1,6 +1,7 @@
 #include "dijkstraMapGen.h"
 #include "ecsTypes.h"
 #include "dungeonUtils.h"
+#include "aiUtils.h"
 
 template<typename Callable>
 static void query_dungeon_data(flecs::world &ecs, Callable c)
@@ -106,3 +107,64 @@ void dmaps::gen_hive_pack_map(flecs::world &ecs, std::vector<float> &map)
   });
 }
 
+void dmaps::gen_low_hp_map(flecs::world &ecs, std::vector<float> &map, flecs::entity &e, float hp)
+{
+  static auto friendQuery = ecs.query<const Position, const Team>();
+  query_dungeon_data(ecs, [&](const DungeonData &dd)
+  {
+    init_tiles(map, dd);
+    e.get([&](const Position& my_pos, const Team& my_team, const Hitpoints &health){
+      friendQuery.each([&](const Position &pos, const Team & friend_team)
+      {
+        if (my_pos != pos && my_team.team == friend_team.team && health.hitpoints < hp) {
+          map[pos.y * dd.width + pos.x] = 0.f;
+        }
+      });
+    });
+    process_dmap(map, dd);
+  });
+}
+
+static bool is_tile_reachable(const DungeonData &dd, int x, int y, int dest_x, int dest_y, int max_dist)
+{
+  Position curPos{x, y};
+  Position destPos{dest_x, dest_y};
+  int range = abs(curPos.x - dest_x) + abs(curPos.y - dest_y);
+  if (range != max_dist)
+    return false;
+  while (curPos != destPos)
+  {
+    curPos = move_pos(curPos, move_towards(curPos, destPos));
+    if (dd.tiles[size_t(curPos.y) * dd.width + size_t(curPos.x)] == dungeon::wall)
+      return false;
+  }
+  return true;
+}
+
+void dmaps::gen_player_radius_approach_map(flecs::world &ecs, std::vector<float> &map, float radius)
+{
+  query_dungeon_data(ecs, [&](const DungeonData &dd)
+  {
+    init_tiles(map, dd);
+    query_characters_positions(ecs, [&](const Position &pos, const Team &t)
+    {
+      if (t.team == 0)
+      {
+        for(int dy = -radius; dy <= radius; dy++)
+          for (int dx = -radius; dx <= radius; dx++)
+          {
+            int px = pos.x + dx;
+            int py = pos.y + dy;
+            if (px < 0 || px >= int(dd.width) ||
+                py < 0 || py >= int(dd.height) ||
+                !is_tile_reachable(dd, pos.x, pos.y, px, py, radius))
+            {
+              continue;
+            }
+            map[py * dd.width + px] = 0.f;
+          }
+      }
+    });
+    process_dmap(map, dd);
+  });
+}
