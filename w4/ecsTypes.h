@@ -72,6 +72,7 @@ enum Actions
   EA_MOVE_END,
   EA_ATTACK = EA_MOVE_END,
   EA_HEAL_SELF,
+  EA_EXPLORE,
   EA_NUM
 };
 
@@ -107,6 +108,7 @@ struct PlayerInput
   bool right = false;
   bool up = false;
   bool down = false;
+  bool explore = false;
 };
 
 struct Symbol
@@ -166,3 +168,8 @@ struct Hive {};
 
 struct Mage {};
 struct TeamMap { std::string name; };
+
+struct ExploreMap {
+  std::vector<bool> explored;
+  int dist;
+};

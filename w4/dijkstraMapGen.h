@@ -9,5 +9,6 @@ namespace dmaps
   void gen_hive_pack_map(flecs::world &ecs, std::vector<float> &map);
   void gen_low_hp_map(flecs::world &ecs, std::vector<float> &map, flecs::entity &e, float hp);
   void gen_player_radius_approach_map(flecs::world &ecs, std::vector<float> &map, float radius);
+  void gen_explore_map(flecs::world &ecs, std::vector<float> &map);
 };
 

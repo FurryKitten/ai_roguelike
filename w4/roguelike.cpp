@@ -148,6 +148,12 @@ static flecs::entity create_monster(flecs::world &ecs, Color col, const char *te
 
 static void create_player(flecs::world &ecs, const char *texture_src)
 {
+  std::vector<bool> exploreMap;
+  static auto dungeonDataQuery = ecs.query<const DungeonData>();
+  dungeonDataQuery.each([&](const DungeonData& dd){
+    exploreMap.assign(dd.height * dd.width, false);
+  });
+
   Position pos = find_free_dungeon_tile(ecs);
 
   flecs::entity textureSrc = ecs.entity(texture_src);
@@ -163,7 +169,8 @@ static void create_player(flecs::world &ecs, const char *texture_src)
     .set(NumActions{2, 0})
     .set(Color{255, 255, 255, 255})
     .add<TextureSource>(textureSrc)
-    .set(MeleeDamage{50.f});
+    .set(MeleeDamage{50.f})
+    .set(ExploreMap{exploreMap, 4});
 }
 
 static void create_heal(flecs::world &ecs, int x, int y, float amount)
@@ -201,8 +208,18 @@ static void register_roguelike_systems(flecs::world &ecs)
 {
   static auto dungeonDataQuery = ecs.query<const DungeonData>();
   ecs.system<PlayerInput, Action, const IsPlayer>()
-    .each([&](PlayerInput &inp, Action &a, const IsPlayer)
+    .each([&](flecs::entity e, PlayerInput &inp, Action &a, const IsPlayer)
     {
+      bool explore = IsKeyDown(KEY_E) || IsKeyDown(KEY_ENTER);
+      inp.explore = explore;
+      if (explore) {
+        a.action = EA_EXPLORE;
+        e.set(DmapWeights{ {{"explore_map", {1.f, 1.f}}} });
+        return;
+      } else {
+        e.remove<DmapWeights>();
+      }
+
       bool left = IsKeyDown(KEY_LEFT);
       bool right = IsKeyDown(KEY_RIGHT);
       bool up = IsKeyDown(KEY_UP);
@@ -535,6 +552,7 @@ void process_turn(flecs::world &ecs)
   static auto turnIncrementer = ecs.query<TurnCounter>();
   if (is_player_acted(ecs))
   {
+    process_dmap_followers<IsPlayer>(ecs, true);
     if (upd_player_actions_count(ecs))
     {
       // Plan action for NPCs
@@ -549,7 +567,7 @@ void process_turn(flecs::world &ecs)
         {
           bt.update(ecs, e, bb);
         });
-        process_dmap_followers(ecs);
+        process_dmap_followers<StateMachine>(ecs, false);
       });
       turnIncrementer.each([](TurnCounter &tc) { tc.count++; });
     }
@@ -582,10 +600,18 @@ void process_turn(flecs::world &ecs)
       ecs.entity(map.name.c_str()).set(DijkstraMapData{ teamMap });
     });
 
+    std::vector<float> exploreMap;
+    dmaps::gen_explore_map(ecs, exploreMap);
+    ecs.entity("explore_map")
+      .set(DijkstraMapData{exploreMap});
+
     //ecs.entity("flee_map").add<VisualiseMap>();
     ecs.entity("approach_radius_map")
       .set(DmapWeights{{{"approach_radius_map", {1.f, 1.f}}}})
       .add<VisualiseMap>();
+    /* ecs.entity("explore_map")
+      .set(DmapWeights{{{"explore_map", {1.f, 1.f}}}})
+      .add<VisualiseMap>(); */
   }
 }
 

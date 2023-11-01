@@ -1,11 +1,14 @@
 #include "ecsTypes.h"
 #include "dmapFollower.h"
+#include "stateMachine.h"
 #include <cmath>
 
-void process_dmap_followers(flecs::world &ecs)
+template<typename T>
+void process_dmap_followers(flecs::world &ecs, bool isPlayer)
 {
   static auto processDmapFollowers = ecs.query<const Position, Action, const DmapWeights>();
   static auto dungeonDataQuery = ecs.query<const DungeonData>();
+  static auto query = ecs.query_builder<const Position, Action, const DmapWeights>().term<T>().build();
 
   auto get_dmap_at = [&](const DijkstraMapData &dmap, const DungeonData &dd, size_t x, size_t y, float mult, float pow)
   {
@@ -16,7 +19,7 @@ void process_dmap_followers(flecs::world &ecs)
   };
   dungeonDataQuery.each([&](const DungeonData &dd)
   {
-    processDmapFollowers.each([&](const Position &pos, Action &act, const DmapWeights &wt)
+    query.each([&](const Position &pos, Action &act, const DmapWeights &wt)
     {
       float moveWeights[EA_MOVE_END];
       for (size_t i = 0; i < EA_MOVE_END; ++i)
@@ -43,3 +46,6 @@ void process_dmap_followers(flecs::world &ecs)
   });
 }
 
+
+template void process_dmap_followers<IsPlayer>(flecs::world &ecs, bool isPlayer);
+template void process_dmap_followers<StateMachine>(flecs::world &ecs, bool isPlayer);

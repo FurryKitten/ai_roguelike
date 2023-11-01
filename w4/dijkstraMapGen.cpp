@@ -141,6 +141,16 @@ static bool is_tile_reachable(const DungeonData &dd, int x, int y, int dest_x, i
   return true;
 }
 
+static int get_range(int x, int y, int dest_x, int dest_y)
+{
+  return abs(x - dest_x) + abs(y - dest_y);
+}
+
+static bool is_tile_in_range(int x, int y, int dest_x, int dest_y, int max_dist)
+{
+  return abs(x - dest_x) + abs(y - dest_y) <= max_dist;
+}
+
 void dmaps::gen_player_radius_approach_map(flecs::world &ecs, std::vector<float> &map, float radius)
 {
   query_dungeon_data(ecs, [&](const DungeonData &dd)
@@ -164,6 +174,38 @@ void dmaps::gen_player_radius_approach_map(flecs::world &ecs, std::vector<float>
             map[py * dd.width + px] = 0.f;
           }
       }
+    });
+    process_dmap(map, dd);
+  });
+}
+
+void dmaps::gen_explore_map(flecs::world &ecs, std::vector<float> &map)
+{
+  static auto playerQuery = ecs.query<const Position, ExploreMap>();
+
+  query_dungeon_data(ecs, [&](const DungeonData &dd)
+  {
+    int closest_x, closest_y, closest_dist = 1e3;
+    init_tiles(map, dd);
+    playerQuery.each([&](const Position& pos, ExploreMap& exploreMap){
+     for (int y = 0; y < dd.height; ++y)
+      for (int x = 0; x < dd.width; ++x)
+      {
+        if (dd.tiles[y * dd.width + x] != dungeon::floor)
+          continue;
+        if (is_tile_in_range(pos.x, pos.y, x, y, exploreMap.dist))
+        {
+          exploreMap.explored[y * dd.width + x] = true;
+        }
+        int curDist = get_range(pos.x, pos.y, x, y);
+        if (!exploreMap.explored[y * dd.width + x] && curDist < closest_dist)
+        {
+          closest_x = x;
+          closest_y = y;
+          closest_dist = curDist;
+        }
+      }
+      map[closest_y * dd.width + closest_x] = 0.f;
     });
     process_dmap(map, dd);
   });
